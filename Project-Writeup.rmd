@@ -1,0 +1,144 @@
+---
+title: "Weight-lifting Data Analysis - Practical Machine Learning"
+date: "October 2015"
+output: html_document
+---
+### Experiment: Weight-lifting 
+
+The motivation for the investigation was to analyse the cause of differing quality in weight-lifting techniques.
+With systematic grouping of observations of the methods used by the chosen weight-lifters, a dataset was collected
+and for each set of observation one of five quality grades was assigned.
+The resulting dataset was published in 2013 (acknowledged below).
+
+### Statistical Analysis:
+
+### *Approach*
+We wish to find the best model for predicting classes of weight-lifting exercises based on the most significant 
+factors (predictors).
+The statistical packets, developed for "machine learning", such as caret, rpart and randomForest, can be used to 
+formulate an optimal model.
+
+### *Data analysis and conversion*
+The data provided included 19621 observations of 160 variables, the first 7 of which were identifiers and 
+experimental design factors, and the last of which was the response to the remaining variables, the predictors.
+The data was quite "sparse" since for many variables either data was missing or not assigned. On removal of those
+factors for which values were missing, there remained 52 parameters to analyse as predictors.
+Of the two models developed using rpart and ransdomForest on 60% of the chosen data, randomForest produced the highest prediction accuracy 
+and lowest errors on cross validation with the other 40% of the data. 
+Therefore this model was used to operate on the assignment's test data in calculating the response, that is, the 
+classification of the weight-lifting exercises, to be submitted for grading.
+
+*Acknowledgement*:
+http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset)
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of 
+Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI 
+(Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+###Loading libraries and exploring the loaded data:
+```{r}
+
+library(ggplot2)
+library(lattice)
+library(caret)
+library(e1071)
+library(rpart)
+library(randomForest)
+projectTrain <-read.csv("pml-training.csv", stringsAsFactors=FALSE)
+projectTest <-read.csv("pml-testing.csv", stringsAsFactors=FALSE)
+dim(projectTrain)
+dim(projectTest)
+```
+Interpreting blank entries as not assigned ("NA") simply by re-loading the data in the uniform format:
+
+```{r}
+
+projectTrain <-read.csv("pml-training.csv", na.strings=c("NA",""), strip.white = T, stringsAsFactors=FALSE)
+projectTest <-read.csv("pml-testing.csv", na.strings=c("NA",""), strip.white = T, stringsAsFactors=FALSE)
+dim(projectTrain)
+dim(projectTest)
+barplot(prop.table(table(projectTrain$classe)))
+```
+
+The number of missing entries in both datasets is calculated in order to decide which variables may justifiably be
+ignored in the model.
+```{r}
+sumNAtrain <- apply(projectTrain, 2, function(x) { sum(is.na(x)) }) 
+sumNAtest <- apply(projectTest, 2, function(x) { sum(is.na(x)) })
+Training <- subset(projectTrain[, which(sumNAtrain == 0)])
+Testing  <- subset(projectTest[, which(sumNAtest == 0)])
+```
+It is obvious that the first 7 columns are identfiers and experimental design constants, rather than observations, are therefore 
+eliminated from the two datasets. 
+
+```{r}
+trainSet <- Training[,8:60]
+testSet <- Testing[,8:60]
+dim(trainSet)
+dim(testSet)
+```
+The last (53rd. column) contains the response "classe" in this training dataset, trainSet, while it contains 
+the identification, "problem_id", in the assignment's test dataset, testSet. 
+In order to choose between models with the classification tree (rpart) and the Random Forest (rf), the training 
+set will be divided into the partial training set and the model testing set on the recommended 60-40% basis 
+using the slicing function, createDataPartition, in the caret package.
+
+```{r}
+partition <- createDataPartition(trainSet$classe, p = 0.60, list=FALSE)
+trainPart <- trainSet[partition,]
+testPart  <- trainSet[-partition,]
+```
+The resulting training dataset will be used to measure the out of sample fit.
+```{r}
+dim(trainPart)
+dim(testPart)
+trainPart$classe <- as.factor(trainPart$classe)
+table(trainPart$classe)
+
+```
+*Creating the models*
+```{r}
+set.seed(2024)
+modelRpart <- train(classe ~., method="rpart", data=trainPart)
+modelRForest <-randomForest(classe~., data=trainPart, type="class")
+```
+
+*Comparing the out of sample accuracey with each model*
+```{r}
+
+confusionMatrix(testPart$classe, predict(modelRpart, testPart))
+confusionMatrix(testPart$classe, predict(modelRForest, testPart))
+```
+It can be seen how all fitting parameters in the Random Forest model are superior to those of the Classification 
+Tree method. The accuracy of the former (99%) is in fact double that of the latter model (49%). 
+Therefore the Random Forest model is chosen for the final model.
+The importance of the variable can be seen using the function impVar, as follows:
+
+```{r}
+importPredictors <-varImp(modelRForest)
+index <- order(importPredictors$Overall,decreasing=TRUE)
+tablePred <-cbind(rownames(importPredictors),importPredictors)
+decImportPredictors <-tablePred[index,]
+rownames(decImportPredictors) <- c()
+colnames(decImportPredictors) <- c("Exercise", "Overall")
+head(decImportPredictors, 15)
+```
+The final model is applied to the completely independent test data provided by the assignment. 
+
+##Result:
+```{r}
+testAnswer <-predict(modelRForest,newdata=testSet)
+
+pml_write_files = function (x) {
+          n = length(x)
+          for (i in 1:n) {
+                filename = paste0('problem_id_',i,'.txt')
+                write.table(x[i], file=filename, quote=FALSE, 
+                                  row.names=FALSE, col.names=FALSE)
+                }
+          }
+answers <- as.character(testAnswer)
+pml_write_files(answers)
+```
+The files produced contain the prediction of the model developed for each of the 20 sets of predictors 
+provided in the test.
+According to the submission, these were all acceptable predictions.
